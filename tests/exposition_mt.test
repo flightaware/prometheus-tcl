@@ -1,0 +1,227 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+package require struct::list
+
+##
+##
+## MERGE TESTS
+##
+##
+
+##
+## Counters
+##
+# Merge counters without labels or timestamps
+set counters [list \
+    [dict create c1 {help {} type counter labelKeys {} metrics {{} {value 1.0 ts 0}}}] \
+    [dict create c1 {help {} type counter labelKeys {} metrics {{} {value 1.0 ts 0}}}]]
+test_return \
+  prom::_mt_merge_collections [list $counters] \
+  {c1 {help {} type counter labelKeys {} metrics {{} {value 2.0 ts 0}}}}
+
+# Merge two counters without labels but with different metric names
+set counters [list \
+    [dict create c1 {help {} type counter labelKeys {} metrics {{} {value 1.0 ts 0}}}] \
+    [dict create c2 {help {} type counter labelKeys {} metrics {{} {value 1.0 ts 0}}}]]
+test_return \
+  prom::_mt_merge_collections [list $counters] \
+  [dict create c1 {help {} type counter labelKeys {} metrics {{} {value 1.0 ts 0}}} \
+               c2 {help {} type counter labelKeys {} metrics {{} {value 1.0 ts 0}}}]
+
+# Merge counters without labels but with timestamps
+set counters [list \
+    [dict create c1 {help {} type counter labelKeys {} metrics {{} {value 1.0 ts 1}}}] \
+    [dict create c1 {help {} type counter labelKeys {} metrics {{} {value 1.0 ts 2}}}]]
+test_return \
+  prom::_mt_merge_collections [list $counters] \
+  {c1 {help {} type counter labelKeys {} metrics {{} {value 2.0 ts 2}}}}
+
+# Merge counters with labels without timestamps
+set counters [list \
+    [dict create c1 {help {} type counter labelKeys {k} metrics {v1 {value 1.0 ts 0}}}] \
+    [dict create c1 {help {} type counter labelKeys {k} metrics {v1 {value 1.0 ts 0}}}] \
+    [dict create c1 {help {} type counter labelKeys {k} metrics {v2 {value 1.0 ts 0}}}]]
+test_return \
+  prom::_mt_merge_collections [list $counters] \
+  {c1 {help {} type counter labelKeys k metrics {v1 {value 2.0 ts 0} v2 {value 1.0 ts 0}}}}
+
+# Merge counters with labels with timestamps
+set counters [list \
+    [dict create c1 {help {} type counter labelKeys {k} metrics {v1 {value 1.0 ts 1}}}] \
+    [dict create c1 {help {} type counter labelKeys {k} metrics {v1 {value 1.0 ts 2}}}] \
+    [dict create c1 {help {} type counter labelKeys {k} metrics {v2 {value 1.0 ts 3}}}]]
+test_return \
+  prom::_mt_merge_collections [list $counters] \
+  {c1 {help {} type counter labelKeys k metrics {v1 {value 2.0 ts 2} v2 {value 1.0 ts 3}}}}
+
+##
+## Gauges
+##
+# Merge gauges without labels with timestamps with the default merge policy of max
+set gauges [list \
+    [dict create g1 {help {} type gauge labelKeys {} merge max metrics {{} {value 1.0 ts 0}}}] \
+    [dict create g1 {help {} type gauge labelKeys {} merge max metrics {{} {value 1.0 ts 0}}}] \
+    [dict create g2 {help {} type gauge labelKeys {} merge max metrics {{} {value 1.0 ts 2}}}] \
+    [dict create g2 {help {} type gauge labelKeys {} merge max metrics {{} {value 2.0 ts 1}}}]]
+test_return \
+  prom::_mt_merge_collections [list $gauges] \
+  [dict create g1 {help {} type gauge labelKeys {} merge max metrics {{} {value 1.0 ts 0}}} \
+               g2 {help {} type gauge labelKeys {} merge max metrics {{} {value 2.0 ts 1}}}]
+
+# Merge gauges without labels with timestamps with a merge policy of min
+set gauges [list \
+    [dict create g1 {help {} type gauge labelKeys {} merge min metrics {{} {value 0.0 ts 1}}}] \
+    [dict create g1 {help {} type gauge labelKeys {} merge min metrics {{} {value 1.0 ts 2}}}] \
+    [dict create g2 {help {} type gauge labelKeys {} merge min metrics {{} {value 1.0 ts 3}}}] \
+    [dict create g2 {help {} type gauge labelKeys {} merge min metrics {{} {value 2.0 ts 4}}}] \
+    [dict create g3 {help {} type gauge labelKeys {} merge min metrics {{} {value 5.0 ts 5}}}]]
+test_return \
+  prom::_mt_merge_collections [list $gauges] \
+  [dict create g1 {help {} type gauge labelKeys {} merge min metrics {{} {value 0.0 ts 1}}} \
+               g2 {help {} type gauge labelKeys {} merge min metrics {{} {value 1.0 ts 3}}} \
+               g3 {help {} type gauge labelKeys {} merge min metrics {{} {value 5.0 ts 5}}}] 
+
+# Merge gauges without labels with timestamps with a merge policy of sum
+set gauges [list \
+    [dict create g1 {help {} type gauge labelKeys {} merge sum metrics {{} {value 0.0 ts 1}}}] \
+    [dict create g1 {help {} type gauge labelKeys {} merge sum metrics {{} {value 1.0 ts 2}}}] \
+    [dict create g2 {help {} type gauge labelKeys {} merge sum metrics {{} {value 1.0 ts 3}}}] \
+    [dict create g2 {help {} type gauge labelKeys {} merge sum metrics {{} {value 2.0 ts 4}}}] \
+    [dict create g3 {help {} type gauge labelKeys {} merge sum metrics {{} {value 5.0 ts 5}}}]]
+test_return \
+  prom::_mt_merge_collections [list $gauges] \
+  [dict create g1 {help {} type gauge labelKeys {} merge sum metrics {{} {value 1.0 ts 2}}} \
+               g2 {help {} type gauge labelKeys {} merge sum metrics {{} {value 3.0 ts 4}}} \
+               g3 {help {} type gauge labelKeys {} merge sum metrics {{} {value 5.0 ts 5}}}] 
+
+##
+## Histogram
+##
+# Merge histograms with timestamps and labels
+set histograms [list \
+    [dict create h1 {help {} type histogram labelKeys {k} metrics {v1 {buckets {1 0 5 1} count 1 sum 5.0 ts 1}}}] \
+    [dict create h1 {help {} type histogram labelKeys {k} metrics {v1 {buckets {1 0 5 2} count 2 sum 10.0 ts 2}}}] \
+    [dict create h1 {help {} type histogram labelKeys {k} metrics {v1 {buckets {1 0 5 3} count 3 sum 15.0 ts 3}}}] \
+    [dict create h1 {help {} type histogram labelKeys {k} metrics {v1 {buckets {1 1 5 0} count 1 sum 1.0 ts 4}}}]]
+test_return \
+  prom::_mt_merge_collections [list $histograms] \
+  {h1 {help {} type histogram labelKeys k metrics {v1 {buckets {1 1 5 6} count 7 sum 31.0 ts 4}}}}
+
+# Merge histograms with timestamps and labels ensuring that all keys make it into the output
+set histograms [list \
+    [dict create h1 {help {} type histogram labelKeys {k} metrics {v1 {buckets {1 0 5 1} count 1 sum 5.0 ts 1}}}] \
+    [dict create h1 {help {} type histogram labelKeys {k} metrics {v1 {buckets {1 0 5 2} count 2 sum 10.0 ts 2}}}] \
+    [dict create h1 {help {} type histogram labelKeys {k} metrics {v1 {buckets {1 0 5 3} count 3 sum 15.0 ts 3}}}] \
+    [dict create h1 {help {} type histogram labelKeys {k} metrics {v2 {buckets {1 1 5 0} count 1 sum 1.0 ts 4}}}]]
+test_return \
+  prom::_mt_merge_collections [list $histograms] \
+  {h1 {help {} type histogram labelKeys k metrics {v1 {buckets {1 0 5 6} count 6 sum 30.0 ts 3} v2 {buckets {1 1 5 0} count 1 sum 1.0 ts 4}}}}
+
+##
+## Summary
+##
+# Merge summaries with labels with timestamps 
+set summarys [list \
+    [dict create s1 {help {} type summary labelKeys {k} metrics {v1 {count 1 sum 1.0 ts 1}}}] \
+    [dict create s1 {help {} type summary labelKeys {k} metrics {v1 {count 1 sum 1.0 ts 2}}}] \
+    [dict create s1 {help {} type summary labelKeys {k} metrics {v1 {count 1 sum 1.0 ts 3}}}] \
+    [dict create s1 {help {} type summary labelKeys {k} metrics {v2 {value 2.0 ts 4}}}]]
+test_return \
+  prom::_mt_merge_collections [list $summarys] \
+  [dict create s1 {help {} type summary labelKeys k metrics {v1 {count 3 sum 3.0 ts 3} v2 {value 2.0 ts 4}}}]
+
+##
+## Thread Tests
+##
+test mt_exposition_times_out_before_successful {
+    Verify that the timeout mechanism for multi-threaded collection works as advertised
+} -setup {
+    package require Thread
+    set tid [thread::create {
+        package require prometheus-tcl
+        prom::counter::new mt_counter 
+        prom::counter::inc mt_counter
+        while {true} {after 1000}
+    }]
+
+    prom::set_collection_policy mt
+    prom::set_mt_collection_timeout 1
+} -cleanup {
+    thread::release $tid
+    prom::set_collection_policy st
+} -body {
+    lindex [time {prom::collect}] 0
+} -match glob -result {1[0-9][0-9][0-9]}
+
+test mt_exposition_works_as_intended {
+    Verify that the basic use of metric collection in a multi-threaded setting works
+} -setup {
+    set tids [list]
+    for {set i 0} {$i < 10} {incr i} {
+      lappend tids [thread::create [format {
+          package require prometheus-tcl
+
+          prom::counter::new ctest
+          prom::counter::inc ctest
+
+          prom::gauge::new gtest -mergePolicy min
+          prom::gauge::set_value gtest %d
+
+          prom::histogram::new htest -buckets {1 5 10}
+          prom::histogram::observe htest %d
+
+          prom::summary::new stest
+          prom::summary::observe stest %d
+
+          thread::wait
+      } {*}[lrepeat 3 $i]]]
+    }
+
+    # Set a multi-threaded collection policy and no timeout
+    prom::set_collection_policy mt
+    prom::set_mt_collection_timeout 0
+
+    # Create some metrics in the collection, thread, too
+    prom::counter::new ctest
+    prom::counter::inc ctest 
+
+    prom::gauge::new gtest -mergePolicy min
+    prom::gauge::set_value gtest 10
+
+    prom::histogram::new htest -buckets {1 5 10}
+    prom::histogram::observe htest 10
+
+    prom::summary::new stest
+    prom::summary::observe stest 10
+} -cleanup {
+    lmap tid $tids {thread::release $tid}
+    lmap name {c g h s} {[prom::get_collection_registry] unregisterName ${name}test}
+} -body {
+    prom::collect
+} -result [string trimleft {
+# HELP ctest ctest
+# TYPE ctest counter
+ctest 11.0
+# HELP gtest gtest
+# TYPE gtest gauge
+gtest 0
+# HELP htest htest
+# TYPE htest histogram
+htest_bucket{le="1"} 2
+htest_bucket{le="5"} 6
+htest_bucket{le="10"} 11
+htest_bucket{le="+Inf"} 11
+htest_sum 55.0
+htest_count 11
+# HELP stest stest
+# TYPE stest summary
+stest_sum 55.0
+stest_count 11
+}]
+
+cleanupTests

@@ -1,0 +1,133 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+package require struct::list
+
+##
+##
+## HISTOGRAM TEST CASES 
+##
+##
+metric_result_test histogram able_to_create_single_bucket_without_labels {} {} {
+# HELP able_to_create_single_bucket_without_labels able_to_create_single_bucket_without_labels
+# TYPE able_to_create_single_bucket_without_labels histogram
+able_to_create_single_bucket_without_labels_bucket{le="1"} 0
+able_to_create_single_bucket_without_labels_bucket{le="+Inf"} 0
+able_to_create_single_bucket_without_labels_sum 0.0
+able_to_create_single_bucket_without_labels_count 0
+} -buckets 1
+
+metric_result_test histogram timing_works_as_expected {k v} {{time {after 1}}} {
+# HELP timing_works_as_expected timing_works_as_expected
+# TYPE timing_works_as_expected histogram
+timing_works_as_expected_bucket{k="v",le="0.001"} 0
+timing_works_as_expected_bucket{k="v",le="+Inf"} 1
+timing_works_as_expected_sum{k="v"} 0.001[0-9]*
+timing_works_as_expected_count{k="v"} 1
+} -buckets 0.001
+
+set totalObservations 100
+set ops [lrepeat $totalObservations {observe Inf}]
+metric_result_test histogram check_sum_and_total_without_labels {} $ops {
+# HELP check_sum_and_total_without_labels check_sum_and_total_without_labels
+# TYPE check_sum_and_total_without_labels histogram
+check_sum_and_total_without_labels_bucket{le="1"} 0
+check_sum_and_total_without_labels_bucket{le="5"} 0
+check_sum_and_total_without_labels_bucket{le="+Inf"} 100
+check_sum_and_total_without_labels_sum +Inf
+check_sum_and_total_without_labels_count 100
+} -buckets {1 5}
+
+metric_result_test histogram check_sum_and_total_without_labels_timestamp {} $ops [format {
+# HELP check_sum_and_total_without_labels_timestamp check_sum_and_total_without_labels_timestamp
+# TYPE check_sum_and_total_without_labels_timestamp histogram
+check_sum_and_total_without_labels_timestamp_bucket{le="5"} 0 %s
+check_sum_and_total_without_labels_timestamp_bucket{le="+Inf"} 100 %s
+check_sum_and_total_without_labels_timestamp_sum +Inf %s
+check_sum_and_total_without_labels_timestamp_count 100 %s
+} {*}[lrepeat 4 [timestamp_glob 13]]] -buckets 5 -timestamp
+
+set ops [lrepeat $totalObservations {observe 1}]
+metric_result_test histogram histogram_check_sum_and_total_single_bucket_without_labels {} $ops [format {
+# HELP histogram_check_sum_and_total_single_bucket_without_labels histogram_check_sum_and_total_single_bucket_without_labels
+# TYPE histogram_check_sum_and_total_single_bucket_without_labels histogram
+histogram_check_sum_and_total_single_bucket_without_labels_bucket{le="1"} %d
+histogram_check_sum_and_total_single_bucket_without_labels_bucket{le="+Inf"} %d
+histogram_check_sum_and_total_single_bucket_without_labels_sum %d.0
+histogram_check_sum_and_total_single_bucket_without_labels_count %d
+} {*}[lrepeat 4 $totalObservations]] -buckets {1}
+
+metric_result_test histogram observe_numerous_values_with_labels_default_buckets {k1 v1} {{observe 1}} {
+# HELP observe_numerous_values_with_labels_default_buckets observe_numerous_values_with_labels_default_buckets
+# TYPE observe_numerous_values_with_labels_default_buckets histogram
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le=".005"} 0
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le=".01"} 0
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le=".025"} 0
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le=".05"} 0
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le=".1"} 0
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le=".25"} 0
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le=".5"} 0
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le="1"} 1
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le="2.5"} 1
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le="5"} 1
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le="10"} 1
+observe_numerous_values_with_labels_default_buckets_bucket{k1="v1",le="+Inf"} 1
+observe_numerous_values_with_labels_default_buckets_sum{k1="v1"} 1.0
+observe_numerous_values_with_labels_default_buckets_count{k1="v1"} 1
+}
+
+set ops {
+    {observe 95 get}
+    {observe 100 get}
+    {observe 102 get}
+    {observe 150 get}
+    {observe 250 get}
+    {observe 75 get}
+    {observe 350 get}
+    {observe 550 get}
+    {observe 950 get}
+    {observe 500 post}
+    {observe 150 post}
+    {observe 450 post}
+    {observe 850 post}
+    {observe 750 post}
+    {observe 1650 post}
+}
+metric_result_test_family histogram observe_for_multiple_label_values {method} $ops {
+# HELP observe_for_multiple_label_values observe_for_multiple_label_values
+# TYPE observe_for_multiple_label_values histogram
+observe_for_multiple_label_values_bucket{method="get",le="100"} 3
+observe_for_multiple_label_values_bucket{method="get",le="300"} 6
+observe_for_multiple_label_values_bucket{method="get",le="500"} 7
+observe_for_multiple_label_values_bucket{method="get",le="750"} 8
+observe_for_multiple_label_values_bucket{method="get",le="1000"} 9
+observe_for_multiple_label_values_bucket{method="get",le="+Inf"} 9
+observe_for_multiple_label_values_sum{method="get"} 2622.0
+observe_for_multiple_label_values_count{method="get"} 9
+observe_for_multiple_label_values_bucket{method="post",le="100"} 0
+observe_for_multiple_label_values_bucket{method="post",le="300"} 1
+observe_for_multiple_label_values_bucket{method="post",le="500"} 3
+observe_for_multiple_label_values_bucket{method="post",le="750"} 4
+observe_for_multiple_label_values_bucket{method="post",le="1000"} 5
+observe_for_multiple_label_values_bucket{method="post",le="+Inf"} 6
+observe_for_multiple_label_values_sum{method="post"} 4350.0
+observe_for_multiple_label_values_count{method="post"} 6
+} -buckets {100 300 500 750 1000}
+
+metric_error_test histogram use_restricted_label_le {le 1} {{observe 1}} 
+
+metric_error_test histogram invalid_buckets_too_few_values {} {} {} -buckets {}
+
+metric_error_test histogram invalid_buckets_too_few_values_Inf {} {} {} -buckets Inf
+
+metric_error_test histogram invalid_buckets_not_sorted_ascending {} {} {} -buckets {3 2 1}
+
+metric_error_test histogram invalid_buckets_non_numeric_boundary {} {} {} -buckets {S1 S2}
+
+metric_error_test histogram observe_non_numeric_value {} {{observe TEXT}} 
+
+cleanupTests

@@ -1,0 +1,85 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+package require struct::list
+package require math
+
+##
+##
+## COUNTER TEST CASES 
+##
+##
+metric_result_test counter no_incs_with_labels {k1 v1} {} {}
+
+metric_result_test counter no_incs_without_labels {} {} {
+# HELP no_incs_without_labels no_incs_without_labels
+# TYPE no_incs_without_labels counter
+no_incs_without_labels 0.0
+}
+
+set testLabels {k1 v1 k2 v2}
+set testOps [lrepeat 100 inc]
+metric_result_test counter multiple_incs $testLabels $testOps {
+# HELP multiple_incs multiple_incs
+# TYPE multiple_incs counter
+multiple_incs{k1="v1",k2="v2"} 100.0
+}
+
+set totalIncs 100
+set testLabels {k1 v1}
+set testOps [list]
+lmap n [struct::list iota $totalIncs] {lappend testOps [list inc -amount $n]}
+set expectedSum [math::sum {*}[struct::list iota $totalIncs]]
+metric_result_test counter inc_by_amount_with_labels $testLabels $testOps [format {
+# HELP inc_by_amount_with_labels inc_by_amount_with_labels
+# TYPE inc_by_amount_with_labels counter
+inc_by_amount_with_labels{k1="v1"} %d.0
+} $expectedSum]
+
+set testLabels {k1 v1 k2 v2 k3 v3}
+set ops [list {inc -amount 0}]
+metric_result_test counter inc_by_zero_with_labels $testLabels $ops {
+# HELP inc_by_zero_with_labels inc_by_zero_with_labels
+# TYPE inc_by_zero_with_labels counter
+inc_by_zero_with_labels{k1="v1",k2="v2",k3="v3"} 0.0
+}
+
+set ops [list {inc -amount 0}]
+metric_result_test counter inc_by_zero_without_labels {} $ops {
+# HELP inc_by_zero_without_labels inc_by_zero_without_labels
+# TYPE inc_by_zero_without_labels counter
+inc_by_zero_without_labels 0.0
+}
+
+set testLabels {k2 v2 k1 v1 k3 v3}
+metric_result_test counter inc_by_float_with_labels $testLabels {{inc -amount 123.4}} {
+# HELP inc_by_float_with_labels inc_by_float_with_labels
+# TYPE inc_by_float_with_labels counter
+inc_by_float_with_labels{k2="v2",k1="v1",k3="v3"} 123.4
+}
+
+metric_result_test counter inc_with_timestamps_with_labels $testLabels {inc} [format {
+# HELP inc_with_timestamps_with_labels inc_with_timestamps_with_labels
+# TYPE inc_with_timestamps_with_labels counter
+inc_with_timestamps_with_labels{k2="v2",k1="v1",k3="v3"} 1.0 %s
+} [timestamp_glob 13]] -timestamp
+
+metric_result_test counter inc_with_timestamps_without_labels {} {inc} [format {
+# HELP inc_with_timestamps_without_labels inc_with_timestamps_without_labels
+# TYPE inc_with_timestamps_without_labels counter
+inc_with_timestamps_without_labels 1.0 %s
+} [timestamp_glob 13]] -timestamp
+
+metric_result_test counter inc_by_float_without_labels {} {{inc -amount 123.4}} {
+# HELP inc_by_float_without_labels inc_by_float_without_labels
+# TYPE inc_by_float_without_labels counter
+inc_by_float_without_labels 123.4
+}
+
+metric_error_test counter inc_by_negative_amount {} {{inc -amount -1}}
+
+cleanupTests

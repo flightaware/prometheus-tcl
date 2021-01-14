@@ -1,0 +1,114 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+
+##
+##
+## GAUGE TEST CASES 
+##
+##
+metric_result_test gauge inc_with_labels {k2 v2 k1 v1} {{inc} {inc -amount 1.34}} {
+# HELP inc_with_labels inc_with_labels
+# TYPE inc_with_labels gauge
+inc_with_labels{k2="v2",k1="v1"} 2.34
+}
+
+metric_result_test gauge inc_without_labels {} {{inc} {inc} {inc}} {
+# HELP inc_without_labels inc_without_labels
+# TYPE inc_without_labels gauge
+inc_without_labels 3.0
+}
+
+metric_result_test gauge inc_timestamp_without_labels {} {{inc} {inc} {inc}} [format {
+# HELP inc_timestamp_without_labels inc_timestamp_without_labels
+# TYPE inc_timestamp_without_labels gauge
+inc_timestamp_without_labels 3.0 %s
+} [timestamp_glob 13]] -timestamp
+
+metric_result_test gauge inc_and_dec_without_labels {} {{inc} {dec}} {
+# HELP inc_and_dec_without_labels inc_and_dec_without_labels
+# TYPE inc_and_dec_without_labels gauge
+inc_and_dec_without_labels 0.0
+}
+
+metric_result_test gauge inc_and_dec_timestamp_without_labels {} {{inc -amount 10} {dec -amount 10}} [format {
+# HELP inc_and_dec_timestamp_without_labels inc_and_dec_timestamp_without_labels
+# TYPE inc_and_dec_timestamp_without_labels gauge
+inc_and_dec_timestamp_without_labels 0.0 %s
+} [timestamp_glob 13]] -timestamp
+
+metric_result_test gauge set_without_labels_to_nan {} {{set_value TEXT}} {
+# HELP set_without_labels_to_nan set_without_labels_to_nan
+# TYPE set_without_labels_to_nan gauge
+set_without_labels_to_nan Nan
+}
+
+metric_result_test gauge set_without_labels_timestamp_to_float {} {{set_value 12.34}} [format {
+# HELP set_without_labels_timestamp_to_float set_without_labels_timestamp_to_float
+# TYPE set_without_labels_timestamp_to_float gauge
+set_without_labels_timestamp_to_float 12.34 %s
+} [timestamp_glob 13]] -timestamp
+
+metric_result_test gauge set_with_labels {k1 v1} {{set_value 1.5} {set_value 10.5}} {
+# HELP set_with_labels set_with_labels
+# TYPE set_with_labels gauge
+set_with_labels{k1="v1"} 10.5
+}
+
+metric_result_test gauge set_to_current_time_without_labels {} {set_to_current_time} [format {
+# HELP set_to_current_time_without_labels set_to_current_time_without_labels
+# TYPE set_to_current_time_without_labels gauge
+set_to_current_time_without_labels %s
+} [timestamp_glob 10]]
+
+metric_result_test gauge set_to_current_time_without_labels_timestamp {} {set_to_current_time} [format {
+# HELP set_to_current_time_without_labels_timestamp set_to_current_time_without_labels_timestamp
+# TYPE set_to_current_time_without_labels_timestamp gauge
+set_to_current_time_without_labels_timestamp %s %s
+} [timestamp_glob 10] [timestamp_glob 13]] -timestamp
+
+metric_error_test gauge inc_by_negative {} {{inc -amount -1}} 
+
+metric_error_test gauge dec_by_negative {} {{dec -amount -1}}
+
+metric_error_test gauge set_to_non_numeric {} {{set STRING}}
+
+test gauge_time_check_metric_set_even_when_an_exception_occurs_in_the_script_being_timed {} -setup {
+    prom::gauge::new seconds 
+} -cleanup {
+    [prom::get_default_registry] unregisterName seconds
+} -body {
+    catch {
+      prom::gauge::time seconds {error ""} 
+    }
+    return [prom::collect]
+} -result [string trimleft {
+# HELP seconds seconds
+# TYPE seconds gauge
+seconds 0.0
+}]
+
+test gauge_time_check_metric_properly_set_to_seconds_rather_than_other_units {} -setup {
+    prom::gauge::new proper_units
+    prom::gauge::new proper_units2
+} -cleanup {
+    [prom::get_default_registry] unregisterName proper_units
+    [prom::get_default_registry] unregisterName proper_units2
+} -body {
+    prom::gauge::time proper_units {after 1}   
+    prom::gauge::time proper_units2 {after 10}   
+    return [prom::collect]
+} -match regexp -result [string trimleft {
+# HELP proper_units proper_units
+# TYPE proper_units gauge
+proper_units 0\.001[0-9]*
+# HELP proper_units2 proper_units2
+# TYPE proper_units2 gauge
+proper_units2 0\.01[0-9]*
+}]
+
+cleanupTests

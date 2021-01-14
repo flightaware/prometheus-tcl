@@ -1,0 +1,80 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+
+##
+##
+## REGISTRY TEST CASES
+##
+##
+test registry_throws_an_error_when_calling_new_multiple_times_for_same_metric_name_and_type {} -setup {
+    prom::counter::new any_valid_metric_name 
+} -body {
+    prom::counter::new any_valid_metric_name
+} -cleanup {
+    [prom::get_default_registry] unregisterName any_valid_metric_name
+} -match regexp -returnCodes {error} -result .*
+
+test registry_ignores_calling_new_multiple_times_for_same_metric_name_and_type_with_proper_policy {} -setup {
+    prom::counter::new any_valid_metric_name
+
+    prom::set_name_conflict_policy ignore
+
+    prom::counter::new any_valid_metric_name
+} -cleanup {
+    [prom::get_default_registry] unregisterName any_valid_metric_name
+    prom::set_name_conflict_policy error
+} -match regexp -returnCodes {return ok} -result .*
+
+test registry_throws_an_error_when_calling_new_multiple_times_for_same_metric_name_but_different_type {} -setup {
+    prom::counter::new any_valid_metric_name 
+} -body {
+    prom::gauge::new any_valid_metric_name
+} -cleanup {
+    [prom::get_default_registry] unregisterName any_valid_metric_name
+} -match regexp -returnCodes {error} -result .*
+
+test registry_throws_an_error_when_trying_to_use_a_metric_that_has_not_been_declared_with_new {} -body {
+    prom::gauge::inc any_valid_metric_name
+} -match regexp -returnCodes {error} -result .*
+
+test registry_ignores_trying_to_use_a_metric_not_declared_with_new_with_proper_policy {} -body {
+    prom::set_name_missing_policy ignore
+
+    prom::counter::inc any_valid_metric_name
+
+    prom::gauge::inc any_valid_metric_name
+    prom::gauge::dec any_valid_metric_name
+    prom::gauge::set_value any_valid_metric_name 1
+    prom::gauge::set_to_current_time any_valid_metric_name
+
+    prom::histogram::observe any_valid_metric_name 1
+
+    prom::summary::observe any_valid_metric_name 1
+} -cleanup {
+    prom::set_name_missing_policy error
+} -match regexp -returnCodes {return ok} -result .*
+
+test registry_throws_and_error_for_conflicting_calls_to_createAndRegisterFamily {} -body {
+    set reg [prom::get_default_registry]
+
+    $reg createAndRegisterFamily counter some_counter -labels {}
+    $reg createAndRegisterFamily counter some_counter -labels {k1 k2 k3}
+} -cleanup {
+    $reg unregisterName some_counter
+} -match regexp -returnCodes {error} -result .*
+
+test registry_okay_with_multiple_calls_with_same_arguments_to_createAndRegisterFamily {} -body {
+    set reg [prom::get_default_registry]
+
+    $reg createAndRegisterFamily counter some_counter -labels {k1 k2 k3}
+    $reg createAndRegisterFamily counter some_counter -labels {k1 k2 k3}
+} -cleanup {
+    $reg unregisterName some_counter
+} -match regexp -returnCodes {return ok} -result .*
+
+cleanupTests

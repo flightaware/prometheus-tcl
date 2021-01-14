@@ -1,0 +1,133 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+package require struct::list
+
+##
+##
+## EXPOSITION OVER HTTP TEST CASES
+##
+##
+
+##
+##
+## VALID REQUEST LINE
+##
+##
+
+# Happy case
+test_return prom::http::pull::valid_request_line {{GET /metrics HTTP/1.1}} 1
+
+# Extra space between the method and the request-target
+test_return prom::http::pull::valid_request_line {{GET  /metrics HTTP/1.1}} 0
+
+# Extra space between the request-target and the HTTP-version
+test_return prom::http::pull::valid_request_line {{GET /metrics  HTTP/1.1}} 0
+
+# Extra space before the method
+test_return prom::http::pull::valid_request_line {{ GET /metrics HTTP/1.1}} 0
+
+# Missing forward slash in request-target
+test_return prom::http::pull::valid_request_line {{GET metrics HTTP/1.1}} 0
+
+# Looks fine to this regexp although the version will get rejected later
+test_return prom::http::pull::valid_request_line {{GET /metrics HTTP/1.0}} 1
+
+##
+##
+## HTTP REQUEST ACCEPTED
+##
+##
+
+# Happy case
+test_return prom::http::pull::http_request_accepted {"/" "GET / HTTP/1.1" {host h} _} 1
+
+# Unsupported HTTP version
+test_return prom::http::pull::http_request_accepted {"/" "GET / HTTP/1.0" {host h} _} 0
+
+# Invalid path requested
+test_return prom::http::pull::http_request_accepted {"/" "GET /metrics HTTP/1.1" {host h} _} 0
+
+# Whitespace before the GET
+test_return prom::http::pull::http_request_accepted {"/" " GET / HTTP/1.1" {host h} _} 0
+
+# Missing a Host header
+test_return prom::http::pull::http_request_accepted {"/" "GET / HTTP/1.1" {} _} 0
+
+##
+##
+## VALID REQUEST TARGET
+##
+##
+
+# Happy case
+test_return prom::http::pull::valid_request_target {"GET /metrics HTTP/1.1" "/metrics"} 1
+
+# Sad case
+test_return prom::http::pull::valid_request_target {"GET /metric HTTP/1.1" "/metrics"} 0
+
+##
+##
+## VALID BLANK LINE
+##
+##
+
+# Happy case
+test_return prom::http::pull::valid_blank_line {"GET /metrics HTTP/1.1" {host h}} 1
+
+# Missing headers entirely
+test_return prom::http::pull::valid_blank_line {"GET /metrics HTTP/1.1" {}} 0
+
+# Missing the host header
+test_return prom::http::pull::valid_blank_line {"GET /metrics HTTP/1.1" {Accept */*}} 0
+
+##
+##
+## PUSH GATEWAY TESTS
+##
+##
+
+# Hostname without port or scheme
+test_return prom::http::push::_gateway_url {"localhost" "jobName" {} _} http://localhost:9091/metrics/job/jobName
+
+# Hostname with port but not scheme
+test_return prom::http::push::_gateway_url {"localhost:12345" "jobName" {} _} http://localhost:12345/metrics/job/jobName
+
+# Hostname without port but with scheme
+test_return prom::http::push::_gateway_url {"https://localhost" "jobName" {} _} https://localhost:9091/metrics/job/jobName
+
+# Hostname with scheme and port
+test_return prom::http::push::_gateway_url {"https://localhost:12345" "jobName" {} _} https://localhost:12345/metrics/job/jobName
+
+# Grouping keys with a single key-value pair
+test_return prom::http::push::_gateway_url {"localhost" "jobName" {k1 v1} _} http://localhost:9091/metrics/job/jobName/k1/v1
+
+# Grouping keys with multiple key-value pairs
+test_return prom::http::push::_gateway_url {"localhost" "jobName" {k1 v1 k2 v2} _} http://localhost:9091/metrics/job/jobName/k1/v1/k2/v2
+
+# Grouping keys requiring base64
+test_return prom::http::push::_gateway_url {"localhost" "directory_cleaner" {path /var/tmp} _} http://localhost:9091/metrics/job/directory_cleaner/path@base64/L3Zhci90bXA
+
+# Job name requiring base64
+test_return prom::http::push::_gateway_url {"localhost" "/jobName" {} _} http://localhost:9091/metrics/job@base64/L2pvYk5hbWU
+
+# Job name requiring quoting
+test_return prom::http::push::_gateway_url {"localhost" "job Name" {} _} http://localhost:9091/metrics/job/job%20Name
+
+# Grouping keys requiring quoting
+test_return prom::http::push::_gateway_url {"localhost" "jobName" {"key" "value with space"} _} http://localhost:9091/metrics/job/jobName/key/value%20with%20space
+
+# Grouping keys requiring quoting, part 2
+test_return prom::http::push::_gateway_url {"localhost" "titan" {"name" "Προμηθεύς"} _} http://localhost:9091/metrics/job/titan/name/%CE%A0%CF%81%CE%BF%CE%BC%CE%B7%CE%B8%CE%B5%CF%8D%CF%82
+
+# Invalid URI scheme
+test_error prom::http::push::_gateway_url {"ftp://localhost" "jobName" {} _}
+
+# Invalid URI
+test_error prom::http::push::_gateway_url {"localhost:PORT" "jobName" {} _}
+
+cleanupTests

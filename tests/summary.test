@@ -1,0 +1,53 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+package require struct::list
+package require math
+
+##
+##
+## SUMMARY TEST CASES 
+##
+##
+set totalObservations 100
+
+set ops [lrepeat $totalObservations {observe 1}]
+metric_result_test summary observe_values_without_labels {} $ops [format {
+# HELP observe_values_without_labels observe_values_without_labels
+# TYPE observe_values_without_labels summary
+observe_values_without_labels_sum %d.0
+observe_values_without_labels_count %d
+} $totalObservations $totalObservations]
+
+set ops [lmap n [struct::list iota $totalObservations] {list observe $n}]
+set expectedSum [math::sum {*}[struct::list iota $totalObservations]]
+metric_result_test summary observe_values_with_labels {k1 v1 k2 v2} $ops [format {
+# HELP observe_values_with_labels observe_values_with_labels
+# TYPE observe_values_with_labels summary
+observe_values_with_labels_sum{k1="v1",k2="v2"} %d.0
+observe_values_with_labels_count{k1="v1",k2="v2"} %d
+} $expectedSum $totalObservations]
+
+metric_result_test summary observe_value_with_labels_with_timestamp {k1 v1 k2 v2} $ops [format {
+# HELP observe_value_with_labels_with_timestamp observe_value_with_labels_with_timestamp
+# TYPE observe_value_with_labels_with_timestamp summary
+observe_value_with_labels_with_timestamp_sum{k1="v1",k2="v2"} %d.0 %s
+observe_value_with_labels_with_timestamp_count{k1="v1",k2="v2"} %d %s
+} $expectedSum [timestamp_glob 13] $totalObservations [timestamp_glob 13]] -timestamp
+
+metric_result_test summary timing_works_as_expected {k v} {{time {after 1}}} {
+# HELP timing_works_as_expected timing_works_as_expected
+# TYPE timing_works_as_expected summary
+timing_works_as_expected_sum{k="v"} 0.001[0-9]*
+timing_works_as_expected_count{k="v"} 1
+} 
+
+metric_error_test summary observe_non_numeric_value_without_labels {} {{observe STRING}} 
+
+metric_error_test summary use_restricted_label_le {le 1} {{observe 1}} 
+
+cleanupTests

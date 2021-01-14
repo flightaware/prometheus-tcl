@@ -1,0 +1,79 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+
+##
+##
+## VALIDATORS TEST CASES
+##
+##
+proc all_invalid_labels {labels} {
+    foreach label $labels {
+        foreach metricType [prom::metric_types] {
+            try {
+                prom::${metricType}::new ${metricType}_name -labels $label
+            } on error {} {
+                continue
+            } finally {
+                [prom::get_default_registry] unregisterName ${metricType}_name
+            }
+
+            error "$label is not an invalid label"
+        }
+    }
+}
+
+test verify_error_thrown_from_invalid_label_names_by_the_client_api {} -setup {
+    set invalidLabels {
+        0starts_with_number
+        has-a-dash
+        has-a-newline\n
+        :starts_with_bad_punctuation
+        uses_non_ascii_\u65E5\u672C
+    }
+} -body {
+    all_invalid_labels $invalidLabels
+} -match regexp -returnCodes {return ok} -result .*
+
+
+proc all_invalid_metric_names {names} {
+    foreach name $names {
+        foreach metricType [prom::metric_types] {
+            try {
+                prom::${metricType}::new $name
+            } on error {} {
+                continue
+            } finally {
+                [prom::get_default_registry] unregisterName $name
+            }
+
+            error "$name is not invalid an invalid metric name"
+        }
+    }
+}
+
+test verify_error_thrown_from_invalid_label_names_by_the_client_api {} -setup {
+    set invalidNames [subst {
+        0starts_with_number
+        has-a-dash
+        has-a-newline\n
+        !starts_with_bad_punctuation
+        uses_non_ascii_\u65E5\u672C
+    }]
+} -body {
+    all_invalid_labels $invalidLabels
+} -match regexp -returnCodes {return ok} -result .*
+
+test registry_throws_an_error_when_calling_new_multiple_times_for_same_metric_name_and_type {} -setup {
+    prom::counter::new any_valid_metric_name 
+} -body {
+    prom::counter::new any_valid_metric_name
+} -cleanup {
+    [prom::get_default_registry] unregisterName any_valid_metric_name
+} -match regexp -returnCodes {error} -result .*
+
+cleanupTests

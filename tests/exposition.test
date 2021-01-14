@@ -1,0 +1,231 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+package require struct::list
+
+##
+##
+## EXPOSITION TEST CASES
+##
+##
+
+test label_values_and_metric_help_text_correctly_escapes_required_characters {
+    Verify that backslash, linefeed and double quotes are escaped in label values
+    and that help is properly quotes baskslash and linefeed
+} -body {
+    prom::counter::new quoted_counter -help {Text "contains" \\escapees\\ \\} -labels {path error}
+
+    prom::counter::inc quoted_counter {C:\DIR\FILE.TXT} "Cannot find file:\n\"FILE.TXT\""
+
+    return [prom::collect]
+} -cleanup {
+    [prom::get_default_registry] unregisterName quoted_counter 
+} -result [string trimleft { 
+# HELP quoted_counter Text "contains" \\\\escapees\\\\ \\\\
+# TYPE quoted_counter counter
+quoted_counter{path="C:\\DIR\\FILE.TXT",error="Cannot find file:\n\"FILE.TXT\""} 1.0
+}]
+
+test exposition_contains_linefeed_at_end_of_last_line {
+    Verify that the last line ends with a line feed character which is part of the exposition
+    format's requirements: https://prometheus.io/docs/instrumenting/exposition_formats/
+} -body {
+    prom::counter::new test_linefeed 
+    prom::counter::inc test_linefeed 
+  
+    return [expr {[string index [prom::collect] end] eq "\n"}]
+} -cleanup {
+    [prom::get_default_registry] unregisterName test_linefeed
+} -result 1
+
+test exposition_for_non_empty_global_namespace {
+    Verify that when a global namespace is specified that it ends up in the collected output
+} -setup {
+    prom::set_namespace ns
+} -body {
+    foreach metricType [prom::metric_types] {
+        if {$metricType eq "info"} {continue}
+
+        prom::${metricType}::new ${metricType}_test
+    }
+
+    foreach metricType [prom::metric_types] {
+        if {$metricType in {counter gauge}} {
+            prom::${metricType}::inc ${metricType}_test
+        } elseif {$metricType ne "info"} {
+            prom::${metricType}::observe ${metricType}_test 0
+        }
+    } 
+
+    return [prom::collect]
+} -cleanup {
+    set reg [prom::get_default_registry]
+    lmap mt [prom::metric_types] {$reg unregisterName ${mt}_test}
+
+    prom::set_namespace ""
+} -result [string trimleft {
+# HELP ns_counter_test ns_counter_test
+# TYPE ns_counter_test counter
+ns_counter_test 1.0
+# HELP ns_gauge_test ns_gauge_test
+# TYPE ns_gauge_test gauge
+ns_gauge_test 1.0
+# HELP ns_histogram_test ns_histogram_test
+# TYPE ns_histogram_test histogram
+ns_histogram_test_bucket{le=".005"} 1
+ns_histogram_test_bucket{le=".01"} 1
+ns_histogram_test_bucket{le=".025"} 1
+ns_histogram_test_bucket{le=".05"} 1
+ns_histogram_test_bucket{le=".1"} 1
+ns_histogram_test_bucket{le=".25"} 1
+ns_histogram_test_bucket{le=".5"} 1
+ns_histogram_test_bucket{le="1"} 1
+ns_histogram_test_bucket{le="2.5"} 1
+ns_histogram_test_bucket{le="5"} 1
+ns_histogram_test_bucket{le="10"} 1
+ns_histogram_test_bucket{le="+Inf"} 1
+ns_histogram_test_sum 0.0
+ns_histogram_test_count 1
+# HELP ns_summary_test ns_summary_test
+# TYPE ns_summary_test summary
+ns_summary_test_sum 0.0
+ns_summary_test_count 1
+}]
+
+test exposition_for_per_metric_namespace_with_a_global_namespace_set {
+    Verify that when a global namespace is specified that it ends up in the collected output
+    but that per-metric overrides also work
+} -setup {
+    prom::set_namespace gns
+} -body {
+    prom::counter::new use_gns
+    prom::counter::inc use_gns
+
+    prom::counter::new override_gns -namespace lns
+    prom::counter::inc override_gns
+
+    prom::counter::new blank_override -namespace ""
+    prom::counter::inc blank_override
+
+    return [prom::collect]
+} -cleanup {
+    set reg [prom::get_default_registry]
+
+    $reg unregisterName use_gns
+    $reg unregisterName override_gns
+    $reg unregisterName blank_override
+
+    prom::set_namespace ""
+} -result [string trimleft {
+# HELP gns_use_gns gns_use_gns
+# TYPE gns_use_gns counter
+gns_use_gns 1.0
+# HELP lns_override_gns lns_override_gns
+# TYPE lns_override_gns counter
+lns_override_gns 1.0
+# HELP blank_override blank_override
+# TYPE blank_override counter
+blank_override 1.0
+}]
+
+test exposition_output_for_all_metrics_types {
+    Verify the expected output after creating a metric family for every type
+} -body {
+    foreach metricType [prom::metric_types] {
+        if {$metricType eq "info"} {continue}
+
+        prom::${metricType}::new ${metricType}_name -help "Help me for $metricType"
+
+        if {$metricType eq "counter"} {
+            prom::counter::inc counter_name 
+        } elseif {$metricType eq "gauge"} {
+            prom::gauge::dec gauge_name
+        } elseif {$metricType eq "histogram"} {
+            prom::histogram::observe histogram_name 1
+        } elseif {$metricType eq "summary"} {
+            prom::summary::observe summary_name 1
+        }
+    }
+
+    return [prom::collect]
+} -cleanup {
+    lmap mt [prom::metric_types] {[prom::get_default_registry] unregisterName ${mt}_name}
+} -result [string trimleft {
+# HELP counter_name Help me for counter
+# TYPE counter_name counter
+counter_name 1.0
+# HELP gauge_name Help me for gauge
+# TYPE gauge_name gauge
+gauge_name -1.0
+# HELP histogram_name Help me for histogram
+# TYPE histogram_name histogram
+histogram_name_bucket{le=".005"} 0
+histogram_name_bucket{le=".01"} 0
+histogram_name_bucket{le=".025"} 0
+histogram_name_bucket{le=".05"} 0
+histogram_name_bucket{le=".1"} 0
+histogram_name_bucket{le=".25"} 0
+histogram_name_bucket{le=".5"} 0
+histogram_name_bucket{le="1"} 1
+histogram_name_bucket{le="2.5"} 1
+histogram_name_bucket{le="5"} 1
+histogram_name_bucket{le="10"} 1
+histogram_name_bucket{le="+Inf"} 1
+histogram_name_sum 1.0
+histogram_name_count 1
+# HELP summary_name Help me for summary
+# TYPE summary_name summary
+summary_name_sum 1.0
+summary_name_count 1
+}]
+
+test metric_name_callback {
+    Verify that setting a metric name callback actually modifies the names exposed during collection
+} -setup {
+    proc renamer {metricType metricName} {
+        if {$metricType eq "counter"} {set metricName "${metricName}_total"}
+        if {$metricType in {summary histogram}} {set metricName "${metricName}_seconds"}
+        return $metricName
+    }
+
+    prom::metric_name_callback renamer
+} -cleanup {
+    prom::metric_name_callback ""
+} -body {
+    prom::counter::new rename
+    prom::counter::inc rename
+
+    prom::gauge::new engaged
+    prom::gauge::set_value engaged 0
+
+    prom::histogram::new duration -buckets 0
+    prom::histogram::observe duration 100
+
+    prom::summary::new summarize
+    prom::summary::observe summarize 100
+
+    return [prom::collect]
+} -result [string trimleft {
+# HELP rename_total rename_total
+# TYPE rename_total counter
+rename_total 1.0
+# HELP engaged engaged
+# TYPE engaged gauge
+engaged 0
+# HELP duration_seconds duration_seconds
+# TYPE duration_seconds histogram
+duration_seconds_bucket{le="0"} 0
+duration_seconds_bucket{le="+Inf"} 1
+duration_seconds_sum 100.0
+duration_seconds_count 1
+# HELP summarize_seconds summarize_seconds
+# TYPE summarize_seconds summary
+summarize_seconds_sum 100.0
+summarize_seconds_count 1
+}]
+
+cleanupTests

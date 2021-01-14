@@ -1,0 +1,31 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set testDirectory [file join [file dirname [file normalize [info script]]]]
+source [file join $testDirectory metric_test_creators.tcl]
+
+package require prometheus-tcl
+
+##
+##
+## INFO TEST CASES 
+##
+##
+metric_error_test info create_without_labels {} {}
+
+set testLabels {branch version}
+set testOps {{labels master 1.0.0} {labels dev 1.0.1}}
+metric_result_test_family info multiple_values $testLabels $testOps {
+# HELP multiple_values_info multiple_values_info
+# TYPE multiple_values_info gauge
+multiple_values_info{branch="master",version="1.0.0"} 1.0
+multiple_values_info{branch="dev",version="1.0.1"} 1.0
+}
+
+metric_result_test info with_namespace {version 0.0.1} {labels} {
+# HELP ns_with_namespace_info ns_with_namespace_info
+# TYPE ns_with_namespace_info gauge
+ns_with_namespace_info{version="0.0.1"} 1.0
+} -namespace ns
+
+cleanupTests
