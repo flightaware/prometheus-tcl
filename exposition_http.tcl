@@ -92,8 +92,53 @@ namespace eval prom::http::pull {
     # \param[in] args Contains extra args not needed for accepting connections
     proc accept_callback {acceptedPath timeoutMS clientSock args} {
 	configure_client_socket $clientSock
-	lassign [extract_http_request $clientSock $timeoutMS] startLine requestHeaders
+	set afterID [after $timeoutMS [subst {catch {chan close $clientSock}}]]
+	chan event $clientSock readable [subst {
+	    after cancel $afterID
+	    ::prom::http::pull::handle_request $acceptedPath $clientSock
+	}]
+    }
 
+    ## Channel callback for handling the request and sending the response.
+    #
+    # \param[in] acceptedPath -path argument passed to listen
+    # \param[in] clientSock client socket for new connection
+    proc handle_request {acceptedPath clientSock} {
+	set startLine ""
+	set requestHeaders [dict create]
+	set problem 0
+
+	while {[chan gets $clientSock line] >= 0} {
+	    # Stop processing after a blank line once gotten
+	    # a startLine and at least one header
+	    if {$line eq ""} {
+		set problem [expr {![valid_blank_line $startLine $requestHeaders]}]
+		break
+	    }
+
+	    if {$startLine eq ""} {
+		if {![valid_request_line $line]} {
+		    set problem 1
+		    break
+		}
+
+		set startLine $line
+	    } elseif {[valid_header_line $line]} {
+		lassign [split $line :] k v
+
+		# RFC7230 says header field names are case-insensitive (3.2)
+		dict set requestHeaders [string tolower $k] $v
+	    } else {
+		# reject any request that is not a valid header
+		set problem 1
+		break
+	    }
+	}
+
+	if {$problem} {
+	    set errorReason {400 {Bad Request}}
+	    http_reply_not_ok $clientSock $errorReason
+	}
 	if {[http_request_accepted $acceptedPath $startLine $requestHeaders errorReason]} {
 	    http_reply_ok $clientSock $requestHeaders
 	} else {
@@ -163,77 +208,6 @@ namespace eval prom::http::pull {
 	return [expr {10**6}]
     }
 
-
-    ## Return 1 if a newly connected client has sent us data
-    #
-    # \param[in] clientSock Client socket
-    # \param[in] timeoutMS Timeout in milliseconds to wait for data
-    #
-    # This proc uses the event loop, vwait and a readable chan event
-    # callback to wait for data to read on the client socket
-    #
-    # A timeout is necessary so a client who connects but sends nothing
-    # is not allowed to hold the connection open indefinitely
-    proc ready_to_read {clientSock timeoutMS} {
-	set readableVar prom::http::pull::${clientSock}_readable
-	chan event $clientSock readable [list set $readableVar 1]
-
-	set afterID [after $timeoutMS [list set $readableVar 0]]
-	vwait $readableVar
-
-	after cancel $afterID
-	chan event $clientSock readable ""
-
-	return [set $readableVar]
-    }
-
-
-    ## Extract the start line and request headers from an HTTP request
-    #
-    # \param[in] clientSock Client socket
-    # \param[in] timeoutMS Timeout in milliseconds to wait for data
-    #
-    # \returns two-element list of {startLine requestHeaders} where startLine is
-    #  a three-element list of {method request-target HTTP-version} and requestHeaders
-    #  is a dictionary of the headers provided
-    proc extract_http_request {clientSock timeoutMS} {
-	if {![ready_to_read $clientSock $timeoutMS]} {
-	    return
-	}
-
-	set startLine ""
-	set requestHeaders [dict create]
-
-	while {[chan gets $clientSock line] >= 0} {
-	    # Stop processing after a blank line once gotten
-	    # a startLine and at least one header
-	    if {$line eq ""} {
-		if {[valid_blank_line $startLine $requestHeaders]} {
-		    break
-		} else {
-		    return
-		}
-	    }
-
-	    if {$startLine eq ""} {
-		if {![valid_request_line $line]} {
-		    break
-		}
-
-		set startLine $line
-	    } elseif {[valid_header_line $line]} {
-		lassign [split $line :] k v
-
-		# RFC7230 says header field names are case-insensitive (3.2)
-		dict set requestHeaders [string tolower $k] $v
-	    } else {
-		# reject any request that is not a valid header
-		return
-	    }
-	}
-
-	return [list $startLine $requestHeaders]
-    }
 
     ## Whether the first line of the HTTP request is valid
     #
