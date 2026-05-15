@@ -213,7 +213,7 @@ namespace eval prom::http::pull {
     #
     # \param[in] startLine First line read from the HTTP request
     proc valid_request_line {startLine} {
-	return [regexp {^GET /\w* HTTP/\d\.\d$} $startLine]
+	return [regexp {^GET /[^/\s]* HTTP/\d\.\d$} $startLine]
     }
 
 
