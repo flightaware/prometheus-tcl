@@ -159,7 +159,7 @@ namespace eval prom {
 	    {tls "Enable TLS"}
 	    {tlsArgs.arg "" "List of arguments to pass to tls::import"}
 	    {path.arg "/metrics" "URI path to respond to requests for"}
-	    {timeoutMS.arg 100 "Once a client connects, max milliseconds to wait for a request"}
+	    {timeoutMS.arg 1000 "Once a client connects, max milliseconds to wait for a request"}
 	}
 
 	array set opts [::cmdline::getoptions args $options $usage]
