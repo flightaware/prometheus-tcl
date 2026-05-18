@@ -1,4 +1,4 @@
-package provide prometheus-tcl 0.0.1
+package provide prometheus-tcl 1.0.0
 
 ## \file config.tcl
 # Small collection of procs for setting global configuration settings

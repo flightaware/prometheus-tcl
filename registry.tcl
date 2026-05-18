@@ -1,4 +1,4 @@
-package provide prometheus-tcl 0.0.1
+package provide prometheus-tcl 1.0.0
 
 ## \file registry.tcl
 # A Registry object maintains a dictionary of MetricFamily objects

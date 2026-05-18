@@ -1,4 +1,4 @@
-package provide prometheus-tcl 0.0.1
+package provide prometheus-tcl 1.0.0
 
 ## \file metric_family.tcl
 # Contains a core abstraction used by the package's internals
