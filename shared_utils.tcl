@@ -1,4 +1,4 @@
-package provide prometheus-tcl 0.0.1
+package provide prometheus-tcl 1.0.0
 
 ## \file shared_utils.tcl
 # Place to store shared helper or utility functions within the prom namespace

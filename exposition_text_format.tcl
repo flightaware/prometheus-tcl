@@ -1,4 +1,4 @@
-package provide prometheus-tcl 0.0.1
+package provide prometheus-tcl 1.0.0
 
 ## \file exposition_text_format.tcl
 # Provides the procs needed to turn the output of the collect method
